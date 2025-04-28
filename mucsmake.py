@@ -11,6 +11,7 @@ import re
 import shutil
 import signal
 import stat
+import build_and_run
 from datetime import datetime
 from pathlib import Path
 import tomlkit
@@ -80,33 +81,29 @@ def main(username: str, class_code: str, lab_name: str, file_name: str):
     enrollment_status = verify_student_enrollment(config_obj)
     if not enrollment_status:
         print(f"{Fore.RED}*** Error: You are not enrolled in {Style.RESET_ALL}{Fore.BLUE}{config_obj.class_code}{Style.RESET_ALL}{Fore.RED} ")
+        exit()
     grader = determine_section(config_obj, username)
     
     student_temp_dir = prepare_test_directory(config_obj, file_name, lab_name, username)
     # Stage 3 - Compile and Run
-    run_result = compile_and_run_submission(config_obj, student_temp_dir)
+    run_errors = compile_and_run_submission(config_obj, student_temp_dir)
     clean_up_test_directory(student_temp_dir)
     # Stage 4 - Place Submission
-    place_submission(config_obj, lab_window_status, run_result, grader, lab_name, file_name, username)
+    place_submission(config_obj=config_obj, lab_window_status=lab_window_status, grader=grader, lab_name=lab_name, file_name=file_name, username=username, run_result=run_errors)
     # Stage 5 - Display Results
-    display_results(config_obj, lab_window_status, run_result, grader, lab_name, file_name, username)
+    display_results(config_obj=config_obj, lab_window_status=lab_window_status, grader=grader, lab_name=lab_name, file_name=file_name, username=username, run_result=run_errors)
 
 
 
-def place_submission(config_obj: Config, lab_window_status: bool, run_result: bool, grader: str, lab_name: str, file_name: str, username: str):
+def place_submission(config_obj: Config, lab_window_status: bool, run_result: dict, grader: str, lab_name: str, file_name: str, username: str):
     submission_path = config_obj.lab_submission_directory + "/" + lab_name + "/" + grader
     directory_name = username + "_" + str(datetime.today()).replace(" ", "_")
     valid_path = submission_path + "/" + config_obj.valid_dir
     invalid_path = submission_path + "/" + config_obj.invalid_dir
 
-    is_valid = lab_window_status and run_result
-    if not os.path.exists(valid_path):
-        os.makedirs(valid_path)
-    if not os.path.exists(invalid_path):
-        os.makedirs(invalid_path)
-
-
-
+    is_valid = lab_window_status and run_result.get("no_compile") is None
+    os.makedirs(valid_path, exist_ok=True)
+    os.makedirs(invalid_path, exist_ok=True)
 
     if (is_valid):
         valid_student_dir = valid_path + "/" + directory_name
@@ -141,10 +138,14 @@ def display_results(config_obj: Config, lab_window_status: bool, run_result: boo
         print(f"{Fore.RED}========================================={Style.RESET_ALL}")
         print(f"{Fore.RED}*******OUTSIDE OF SUBMISSION WINDOW******{Style.RESET_ALL}")
         print(f"{Fore.RED}========================================={Style.RESET_ALL}")
-    elif (run_result == False): 
+    elif (run_result.get("no_compile") is not None): 
         print(f"{Fore.RED}========================================={Style.RESET_ALL}")
         print(f"{Fore.RED}************FAILED TO COMPILE************{Style.RESET_ALL}")
         print(f"{Fore.RED}========================================={Style.RESET_ALL}")
+    elif(len(run_result) > 0):
+        print(f"{Fore.YELLOW}====================================================={Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}**********SUBMISSION SUCCESSFUL WITH ERRORS**********{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}====================================================={Style.RESET_ALL}")
     else:
         print(f"{Fore.GREEN}========================================={Style.RESET_ALL}")
         print(f"{Fore.GREEN}**********SUBMISSION SUCCESSFUL**********{Style.RESET_ALL}")
@@ -212,7 +213,6 @@ def verify_student_enrollment(config_obj: Config):
         return True
     return False
 
-
 def determine_section(config_obj: Config, username: str) -> str:
     try:
         for roster_filename in os.listdir(config_obj.roster_directory):
@@ -233,8 +233,6 @@ def determine_section(config_obj: Config, username: str) -> str:
 def prepare_test_directory(config_obj: Config, file_name: str, lab_name: str, username: str) -> str:
     lab_files_dir = config_obj.test_files_directory + "/" + lab_name + "_temp"
     student_temp_files_dir = lab_files_dir + "/" + lab_name + "_" + username + "_temp"
-    # if os.path.exists(student_temp_files_dir):
-    #     clean_up_test_directory(student_temp_files_dir)
     os.makedirs(student_temp_files_dir, exist_ok=True)
     for entry in os.scandir(lab_files_dir):
         if entry.is_dir():
@@ -248,38 +246,19 @@ def compile_and_run_submission(config_obj: Config, temp_dir: str) -> bool:
         if (entry.name == "Makefile"):
             is_make = True
             break
-    result = None
-    if (is_make):
-        result = run(["make"], cwd=temp_dir, stdout=DEVNULL, stderr=PIPE, universal_newlines=True)
-    else:
-        result = run(["compile"], cwd=temp_dir)
+    errors = dict()
+    result = build_and_run.compile(compilable_code_path=temp_dir, use_makefile=is_make, filename=file_name)
     # returns 2 if doesnt link
     if (result.returncode != 0):
         print(result.stderr)
         print(f"{Back.RED}*** Error: Submitted program does not compile! ***{Style.RESET_ALL}")
-        return False
-    executable_path = temp_dir + "/a.out"
-    try:
-        result = run(["stdbuf", "-oL", executable_path], timeout=5, stdout=PIPE, stderr=PIPE, universal_newlines=True)
-    except UnicodeDecodeError as e:
-        print(f"{Fore.RED}Your submission compiled, but the test run was unable to complete.{Style.RESET_ALL}")
-        print(f"{Fore.RED}This is usually a result of a seg fault or undefined behavior in your code.{Style.RESET_ALL}")
-        return True
-    print(result.stdout)
-    # we got an error
-    if (result.returncode < 0):
-        signum = -result.returncode
-        if (signum == signal.SIGSEGV):
-            print(f"{Fore.RED}Segmentation fault detected!{Style.RESET_ALL}")
-    if (config_obj.run_valgrind):
-        stderr = run(["valgrind", executable_path], stdout=PIPE, stderr=PIPE, universal_newlines=True).stderr
-        if re.search(r"[1-9]\d*\s+errors", stderr):
-            print(f"{Fore.RED}Valgrind: There were errors in your program!{Style.RESET_ALL}")
-        if not re.search("(All heap blocks were freed -- no leaks are possible)", stderr):
-            print(f"{Fore.RED}Valgrind: Memory leak detected!{Style.RESET_ALL}")
-    return True
+        errors['no_compile'] = "Submitted program does not compile!"
+        return errors
+    errors = build_and_run.run_executable(path=temp_dir)
+    for error in errors.values():
+        print(f"{Fore.RED}{error}{Style.RESET_ALL}")
+    return errors
 def clean_up_test_directory(temp_dir: str):
-    print(temp_dir)
     shutil.rmtree(temp_dir)
 
 
