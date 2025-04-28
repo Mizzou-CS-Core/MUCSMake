@@ -1,0 +1,3 @@
+-e git+https://github.com/Mizzou-CS-Core/BuildAndRun@46b94898a63ec74a8b7a38d0c6e121dac20f70d4#egg=build_and_run&subdirectory=../../BuildAndRun
+colorama==0.4.6
+tomlkit==0.13.2
