@@ -26,6 +26,7 @@ from configuration.config import get_config
 from validation.validators import verify_assignment_header_inclusion, verify_assignment_existence, \
     verify_assignment_window, \
     verify_assignment_name, verify_student_enrollment, validate_section
+from mucs_database.init import initialize_database
 
 
 def setup_logging():
@@ -60,7 +61,7 @@ logger = logging.getLogger(__name__)
 CONFIG_FILE = "config.toml"
 
 
-def main(username: str, class_code: str, lab_name: str, file_name: str):
+def mucsmake(username: str, class_code: str, lab_name: str, file_name: str):
     # Stage 1 - Prepare Configuration
     if not os.path.exists(path=CONFIG_FILE):
         print()
@@ -71,22 +72,18 @@ def main(username: str, class_code: str, lab_name: str, file_name: str):
     # Stage 2 - Verify Parameters and Submission
     lab_name_status = verify_assignment_name(lab_name)
     if not lab_name_status:
-        print(f"{Fore.RED}*** Error: Lab number missing or invalid. Please check again. ***{Style.RESET_ALL}")
+        logger.error(f"Assignment number {lab_name} is invalid. Please check again.")
         exit()
     lab_file_status = verify_assignment_existence(file_name)
     if not lab_file_status:
-        print(
-            f"{Fore.RED}*** Error: file {Style.RESET_ALL}{Fore.BLUE}{file_name}{Style.RESET_ALL}{Fore.RED} does not exist in the current directory. ***{Style.RESET_ALL}")
+        logger.error(f"File {file_name} does not exist in the current directory.")
         exit()
     lab_header_inclusion = verify_assignment_header_inclusion(file_name)
     if not lab_header_inclusion:
-        print(
-            f"{Fore.YELLOW}*** Warning: your submission {Style.RESET_ALL}{Fore.BLUE}{file_name}{Style.RESET_ALL}{Fore.YELLOW} does not include the lab header file. ***{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}*** There's a good chance your program won't compile! ***{Style.RESET_ALL}")
+        logger.warning(f"Your submission {file_name} does not have the assignment header file.")
     lab_window_status = verify_assignment_window()
     if not lab_window_status:
-        print(
-            f"{Fore.YELLOW}*** Warning: your submission {Style.RESET_ALL}{Fore.BLUE}{file_name}{Style.RESET_ALL}{Fore.YELLOW} is outside of the submission window. ***{Style.RESET_ALL}")
+        logger.warning(f"Your submission {file_name} is outside of the allowed submission window.")
     enrollment_status = verify_student_enrollment(config_obj=get_config())
     if not enrollment_status:
         print(
@@ -206,17 +203,20 @@ def clean_up_test_directory(temp_dir: str):
 if __name__ == "__main__":
     # Stage 0 - Collect Command Args
     username = getpass.getuser()
+    setup_logging()
     colorama_init()
     if len(sys.argv) < 4:
-        print(f"{Fore.RED} *** Too few arguments provided! *** {Style.RESET_ALL}")
-        print(f"{Fore.RED}Usage: mucsmake{Fore.BLUE} {{class_code}} {{lab_name}} {{file_to_submit}} {Style.RESET_ALL}")
+        logger.error("Too few arguments provided!")
+        logger.error("Usage: mucsmake class_code assignment_name file_to_submit")
         exit()
     class_code = sys.argv[1]
     lab_name = sys.argv[2]
     file_name = sys.argv[3]
-    if (os.path.isdir(file_name)):
+    if os.path.isdir(file_name):
         # edge case to catch during preappended absolute paths
-        print(f"{Fore.RED} *** Too few arguments provided! *** {Style.RESET_ALL}")
-        print(f"{Fore.RED}Usage: mucsmake{Fore.BLUE} {{class_code}} {{lab_name}} {{file_to_submit}} {Style.RESET_ALL}")
+        logger.error("Too few arguments provided!")
+        logger.error("Usage: mucsmake class_code assignment_name file_to_submit")
         exit()
-    main(username, class_code, lab_name, file_name)
+    prepare_config_obj()
+    initialize_database(sqlite_db_path=get_config().db_path, mucsv2_instance_code=get_config().mucsv2_instance_code)
+    mucsmake(username, class_code, lab_name, file_name)
