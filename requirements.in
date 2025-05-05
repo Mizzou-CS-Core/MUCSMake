@@ -1,0 +1,5 @@
+colorlog
+tomlkit
+colorama
+git+https://github.com/Mizzou-CS-Core/MUCSDao.git#egg=mucs_database
+git+https://github.com/Mizzou-CS-Core/BuildAndRun.git#egg=build_and_run
