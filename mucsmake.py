@@ -10,13 +10,14 @@ import sys
 import os
 import shutil
 import stat
+
 import build_and_run
 from datetime import datetime
 from pathlib import Path
 
 # https://pypi.org/project/colorama/
 from colorama import init as colorama_init
-from colorama import Fore, Back
+from colorama import Fore
 from colorama import Style
 from colorlog import ColoredFormatter
 
@@ -61,7 +62,7 @@ logger = logging.getLogger(__name__)
 CONFIG_FILE = "config.toml"
 
 
-def mucsmake(username: str, class_code: str, lab_name: str, file_name: str):
+def mucsmake(username: str, lab_name: str, file_name: str):
     # Stage 1 - Prepare Configuration
     if not os.path.exists(path=CONFIG_FILE):
         print()
@@ -91,9 +92,9 @@ def mucsmake(username: str, class_code: str, lab_name: str, file_name: str):
         exit()
     grader = validate_section(username)
 
-    student_temp_dir = prepare_test_directory(get_config(), file_name, lab_name, username)
+    student_temp_dir = prepare_test_directory(file_name, lab_name)
     # Stage 3 - Compile and Run
-    run_errors = compile_and_run_submission(get_config(), student_temp_dir)
+    run_errors = compile_and_run_submission(student_temp_dir)
     clean_up_test_directory(student_temp_dir)
     # Stage 4 - Place Submission
     place_submission(config_obj=get_config(), lab_window_status=lab_window_status, grader=grader, lab_name=lab_name,
@@ -132,7 +133,7 @@ def place_submission(config_obj: Config, lab_window_status: bool, run_result: di
         shutil.copy(file_name, invalid_student_dir)
 
 
-def display_results(config_obj: Config, lab_window_status: bool, run_result: bool, grader: str, lab_name: str,
+def display_results(config_obj: Config, lab_window_status: bool, run_result: dict, grader: str, lab_name: str,
                     file_name: str, username: str):
     print(f"{Fore.BLUE}========================================={Style.RESET_ALL}")
     print(f"Course:     {config_obj.mucsv2_instance_code}")
@@ -143,11 +144,11 @@ def display_results(config_obj: Config, lab_window_status: bool, run_result: boo
     print(f"{Fore.BLUE}========================================={Style.RESET_ALL}")
     print(f"{Fore.BLUE}***********SUBMISSION COMPLETE**********{Style.RESET_ALL}")
     print(f"\n")
-    if (lab_window_status == False):
+    if not lab_window_status:
         print(f"{Fore.RED}========================================={Style.RESET_ALL}")
         print(f"{Fore.RED}*******OUTSIDE OF SUBMISSION WINDOW******{Style.RESET_ALL}")
         print(f"{Fore.RED}========================================={Style.RESET_ALL}")
-    elif (run_result.get("no_compile") is not None):
+    elif run_result.get("no_compile") is not None:
         print(f"{Fore.RED}========================================={Style.RESET_ALL}")
         print(f"{Fore.RED}************FAILED TO COMPILE************{Style.RESET_ALL}")
         print(f"{Fore.RED}========================================={Style.RESET_ALL}")
@@ -161,35 +162,41 @@ def display_results(config_obj: Config, lab_window_status: bool, run_result: boo
         print(f"{Fore.GREEN}========================================={Style.RESET_ALL}")
 
 
-def prepare_test_directory(config_obj: Config, file_name: str, lab_name: str, username: str) -> str:
-    lab_files_dir = config_obj.test_files_directory + "/" + lab_name + "_temp"
-    student_temp_files_dir = lab_files_dir + "/" + lab_name + "_" + username + "_temp"
-    os.makedirs(student_temp_files_dir, exist_ok=True)
-    for entry in os.scandir(lab_files_dir):
+def prepare_test_directory(file_name: str, lab_name: str) -> str:
+    temp_lab_dir = get_config().cwd / f"{lab_name}_temp"
+    logger.debug(f"Creating {temp_lab_dir}")
+    temp_lab_dir.mkdir(exist_ok=True)
+
+    lab_files_dir = get_config().test_files_directory / f"{lab_name}"
+    logger.debug(f"Retrieving files from {lab_files_dir}")
+    for entry in lab_files_dir.iterdir():
         if entry.is_dir():
             continue
-        shutil.copy(entry.path, student_temp_files_dir)
-    shutil.copy(file_name, student_temp_files_dir)
-    return student_temp_files_dir
+        logger.debug(f"Copying {entry} into {temp_lab_dir}")
+        shutil.copy(entry.path, temp_lab_dir)
+    logger.debug(f"Copying student's {file_name} to {temp_lab_dir}")
+    shutil.copy(file_name, temp_lab_dir)
+    return temp_lab_dir
 
 
-def compile_and_run_submission(config_obj: Config, temp_dir: str) -> bool:
+def compile_and_run_submission(temp_dir: str) -> dict[str, str]:
     is_make = False
     for entry in os.scandir(temp_dir):
-        if (entry.name == "Makefile"):
+        if entry.name == "Makefile":
             is_make = True
             break
     errors = dict()
     result = build_and_run.compile(compilable_code_path=temp_dir, use_makefile=is_make, filename=file_name)
     # returns 2 if doesnt link
-    if (result.returncode != 0):
-        print(result.stderr)
-        print(f"{Back.RED}*** Error: Submitted program does not compile! ***{Style.RESET_ALL}")
+    if result.returncode != 0:
+        logging.error(f"Submitted program does not compile!: {result.stderr}")
         errors['no_compile'] = "Submitted program does not compile!"
         return errors
     errors = build_and_run.run_executable(path=temp_dir)
+    if len(errors) > 0:
+        logging.warning(f"There were {len(errors)} errors in your submission. ")
     for error in errors.values():
-        print(f"{Fore.RED}{error}{Style.RESET_ALL}")
+        logging.warning(f"{error}")
     return errors
 
 
@@ -219,4 +226,4 @@ if __name__ == "__main__":
         exit()
     prepare_config_obj()
     initialize_database(sqlite_db_path=get_config().db_path, mucsv2_instance_code=get_config().mucsv2_instance_code)
-    mucsmake(username, class_code, lab_name, file_name)
+    mucsmake(username, lab_name, file_name)

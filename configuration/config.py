@@ -6,7 +6,7 @@ from tomlkit import document, table, comment, dumps
 from configuration.models import Config
 from mucsmake import CONFIG_FILE
 
-_config = None
+_config: Config = None
 logger = logging.getLogger(__name__)
 
 
@@ -38,7 +38,7 @@ def prepare_toml_doc():
     print(f"Created default {CONFIG_FILE}")
 
 
-def get_config() -> Config or None:
+def get_config() -> Config:
     if _config is None:
         logger.error("The config has not been loaded into memory!")
         return None
