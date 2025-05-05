@@ -27,6 +27,37 @@ from csv import DictReader
 from subprocess import DEVNULL, PIPE, run
 
 
+def setup_logging():
+    # everything including debug goes to log file
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+
+    fh = logging.FileHandler("mucs_startup.log", encoding="utf-8")
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s:%(lineno)d - %(message)s"
+    ))
+    # log info and above to console
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    # this format string lets colorlog insert color around the whole line
+    fmt = "%(log_color)s%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    colors = {
+        'DEBUG': 'cyan',
+        'INFO': 'green',
+        'WARNING': 'yellow',
+        'ERROR': 'red',
+        'CRITICAL': 'bold_red',
+    }
+    ch.setFormatter(ColoredFormatter(fmt, log_colors=colors))
+    root.addHandler(fh)
+    root.addHandler(ch)
+
+
+logger = logging.getLogger(__name__)
+
+
+
 class Config:
     def __init__(self,class_code: str, run_valgrind: str, base_path: str, 
     lab_window_path: str, lab_submission_directory: str, 
