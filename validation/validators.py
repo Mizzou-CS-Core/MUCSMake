@@ -6,6 +6,8 @@ from datetime import datetime
 from configuration.models import Config
 
 import mucs_database.assignment.accessors as dao_assignment
+import mucs_database.person.accessors as dao_person
+from mucs_database.grading_group.model import GradingGroup
 
 _assignment: dict = dict()
 
@@ -37,7 +39,7 @@ def verify_assignment_window() -> bool:
     return is_on_time
 
 
-def verify_assignment_name(assignment_name: str) -> bool | None:
+def verify_assignment_name(assignment_name: str) -> bool:
     logging.debug(f"Verifying lab name: {assignment_name}")
     global _assignment
     _assignment = dao_assignment.get_assignment_by_name(name=assignment_name)
@@ -55,3 +57,11 @@ def verify_student_enrollment(config_obj: Config):
     if target in directories:
         return True
     return False
+
+
+def validate_section(username: str) -> str:
+    grading_group: GradingGroup = dao_person.get_person_grading_group(pawprint=username, return_dict=False)
+    if grading_group is None:
+        logging.critical(f"No grading group was found for pawprint: {username}")
+        return ""
+    return grading_group.name

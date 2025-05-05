@@ -20,12 +20,11 @@ from colorama import Fore, Back
 from colorama import Style
 from colorlog import ColoredFormatter
 
-from csv import DictReader
-
 from configuration.config import prepare_toml_doc, prepare_config_obj
 from configuration.models import Config
-from validation.validators import verify_assignment_header_inclusion, verify_assignment_existence, verify_assignment_window, \
-    verify_assignment_name, verify_student_enrollment
+from validation.validators import verify_assignment_header_inclusion, verify_assignment_existence, \
+    verify_assignment_window, \
+    verify_assignment_name, verify_student_enrollment, determine_section
 
 
 def setup_logging():
@@ -40,9 +39,9 @@ def setup_logging():
     ))
     # log info and above to console
     ch = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
+    ch.setLevel(logging.WARNING)
     # this format string lets colorlog insert color around the whole line
-    fmt = "%(log_color)s%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    fmt = "[%(levelname)s]: %(message)s"
     colors = {
         'DEBUG': 'cyan',
         'INFO': 'green',
@@ -58,7 +57,6 @@ def setup_logging():
 logger = logging.getLogger(__name__)
 
 CONFIG_FILE = "config.toml"
-date_format = "%Y-%m-%d_%H:%M:%S"
 
 
 def main(username: str, class_code: str, lab_name: str, file_name: str):
@@ -66,7 +64,7 @@ def main(username: str, class_code: str, lab_name: str, file_name: str):
     if not os.path.exists(path=CONFIG_FILE):
         print()
         prepare_toml_doc()
-        handle_critical_error(f"{CONFIG_FILE} does not exist, creating a default one", "main")
+        logger.critical(f"{CONFIG_FILE} does not exist, creating a default one")
         exit()
     config_obj: Config = prepare_config_obj()
     # Stage 2 - Verify Parameters and Submission
@@ -158,27 +156,6 @@ def display_results(config_obj: Config, lab_window_status: bool, run_result: boo
         print(f"{Fore.GREEN}**********SUBMISSION SUCCESSFUL**********{Style.RESET_ALL}")
         print(f"{Fore.GREEN}========================================={Style.RESET_ALL}")
 
-
-
-
-
-
-def determine_section(config_obj: Config, username: str) -> str:
-    try:
-        for roster_filename in os.listdir(config_obj.roster_directory):
-            with open(config_obj.roster_directory + "/" + roster_filename, 'r') as csv_file:
-                _ = next(csv_file)
-                fieldnames = ['pawprint', 'canvas_id', 'name', 'date']
-                csv_roster = DictReader(csv_file, fieldnames=fieldnames)
-                for row in csv_roster:
-                    if username == row['pawprint']:
-                        return roster_filename.replace(".csv", '')
-    except UnicodeDecodeError as e:
-        handle_critical_error(message=f"{str(e)} - likely misconfigured roster data", calling_function="determine_section")
-    # if we made it out of the loop... panic!
-    # likely a misconfiguration of the grading roster
-    handle_critical_error("No grader found", "determine_section")
-    return ""
 
 def prepare_test_directory(config_obj: Config, file_name: str, lab_name: str, username: str) -> str:
     lab_files_dir = config_obj.test_files_directory + "/" + lab_name + "_temp"
