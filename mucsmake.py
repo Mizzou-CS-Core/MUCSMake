@@ -1,4 +1,4 @@
-# MUCSMakePy 
+# MUCSMakePy
 # Utility to collect student lab submissions
 # Written by Matt Marlow
 # Based on Daphne Zou's original mucsmake script
@@ -22,9 +22,10 @@ from colorlog import ColoredFormatter
 
 from configuration.config import prepare_toml_doc, prepare_config_obj
 from configuration.models import Config
+from configuration.config import get_config
 from validation.validators import verify_assignment_header_inclusion, verify_assignment_existence, \
     verify_assignment_window, \
-    verify_assignment_name, verify_student_enrollment, determine_section
+    verify_assignment_name, verify_student_enrollment, validate_section
 
 
 def setup_logging():
@@ -66,7 +67,7 @@ def main(username: str, class_code: str, lab_name: str, file_name: str):
         prepare_toml_doc()
         logger.critical(f"{CONFIG_FILE} does not exist, creating a default one")
         exit()
-    config_obj: Config = prepare_config_obj()
+    prepare_config_obj()
     # Stage 2 - Verify Parameters and Submission
     lab_name_status = verify_assignment_name(lab_name)
     if not lab_name_status:
@@ -74,33 +75,39 @@ def main(username: str, class_code: str, lab_name: str, file_name: str):
         exit()
     lab_file_status = verify_assignment_existence(file_name)
     if not lab_file_status:
-        print(f"{Fore.RED}*** Error: file {Style.RESET_ALL}{Fore.BLUE}{file_name}{Style.RESET_ALL}{Fore.RED} does not exist in the current directory. ***{Style.RESET_ALL}")
+        print(
+            f"{Fore.RED}*** Error: file {Style.RESET_ALL}{Fore.BLUE}{file_name}{Style.RESET_ALL}{Fore.RED} does not exist in the current directory. ***{Style.RESET_ALL}")
         exit()
     lab_header_inclusion = verify_assignment_header_inclusion(file_name)
     if not lab_header_inclusion:
-        print(f"{Fore.YELLOW}*** Warning: your submission {Style.RESET_ALL}{Fore.BLUE}{file_name}{Style.RESET_ALL}{Fore.YELLOW} does not include the lab header file. ***{Style.RESET_ALL}")
+        print(
+            f"{Fore.YELLOW}*** Warning: your submission {Style.RESET_ALL}{Fore.BLUE}{file_name}{Style.RESET_ALL}{Fore.YELLOW} does not include the lab header file. ***{Style.RESET_ALL}")
         print(f"{Fore.YELLOW}*** There's a good chance your program won't compile! ***{Style.RESET_ALL}")
     lab_window_status = verify_assignment_window()
     if not lab_window_status:
-        print(f"{Fore.YELLOW}*** Warning: your submission {Style.RESET_ALL}{Fore.BLUE}{file_name}{Style.RESET_ALL}{Fore.YELLOW} is outside of the submission window. ***{Style.RESET_ALL}")
-    enrollment_status = verify_student_enrollment(config_obj)
+        print(
+            f"{Fore.YELLOW}*** Warning: your submission {Style.RESET_ALL}{Fore.BLUE}{file_name}{Style.RESET_ALL}{Fore.YELLOW} is outside of the submission window. ***{Style.RESET_ALL}")
+    enrollment_status = verify_student_enrollment(config_obj=get_config())
     if not enrollment_status:
-        print(f"{Fore.RED}*** Error: You are not enrolled in {Style.RESET_ALL}{Fore.BLUE}{config_obj.mucsv2_instance_code}{Style.RESET_ALL}{Fore.RED} ")
+        print(
+            f"{Fore.RED}*** Error: You are not enrolled in {Style.RESET_ALL}{Fore.BLUE}{get_config().mucsv2_instance_code}{Style.RESET_ALL}{Fore.RED} ")
         exit()
-    grader = determine_section(config_obj, username)
-    
-    student_temp_dir = prepare_test_directory(config_obj, file_name, lab_name, username)
+    grader = validate_section(username)
+
+    student_temp_dir = prepare_test_directory(get_config(), file_name, lab_name, username)
     # Stage 3 - Compile and Run
-    run_errors = compile_and_run_submission(config_obj, student_temp_dir)
+    run_errors = compile_and_run_submission(get_config(), student_temp_dir)
     clean_up_test_directory(student_temp_dir)
     # Stage 4 - Place Submission
-    place_submission(config_obj=config_obj, lab_window_status=lab_window_status, grader=grader, lab_name=lab_name, file_name=file_name, username=username, run_result=run_errors)
+    place_submission(config_obj=get_config(), lab_window_status=lab_window_status, grader=grader, lab_name=lab_name,
+                     file_name=file_name, username=username, run_result=run_errors)
     # Stage 5 - Display Results
-    display_results(config_obj=config_obj, lab_window_status=lab_window_status, grader=grader, lab_name=lab_name, file_name=file_name, username=username, run_result=run_errors)
+    display_results(config_obj=get_config(), lab_window_status=lab_window_status, grader=grader, lab_name=lab_name,
+                    file_name=file_name, username=username, run_result=run_errors)
 
 
-
-def place_submission(config_obj: Config, lab_window_status: bool, run_result: dict, grader: str, lab_name: str, file_name: str, username: str):
+def place_submission(config_obj: Config, lab_window_status: bool, run_result: dict, grader: str, lab_name: str,
+                     file_name: str, username: str):
     submission_path = config_obj.lab_submission_directory + "/" + lab_name + "/" + grader
     directory_name = username + "_" + str(datetime.today()).replace(" ", "_")
     valid_path = submission_path + "/" + config_obj.valid_dir
@@ -121,15 +128,15 @@ def place_submission(config_obj: Config, lab_window_status: bool, run_result: di
         # if the link existed previously, let's undo it
         if os.path.islink(symlink_dir):
             os.unlink(symlink_dir)
-        os.symlink(valid_student_dir, symlink_dir, target_is_directory = True)
+        os.symlink(valid_student_dir, symlink_dir, target_is_directory=True)
     else:
         invalid_student_dir = invalid_path + "/" + directory_name
         os.makedirs(invalid_student_dir)
         shutil.copy(file_name, invalid_student_dir)
-    
-    
-def display_results(config_obj: Config, lab_window_status: bool, run_result: bool, grader: str, lab_name: str, file_name: str, username: str):
-    
+
+
+def display_results(config_obj: Config, lab_window_status: bool, run_result: bool, grader: str, lab_name: str,
+                    file_name: str, username: str):
     print(f"{Fore.BLUE}========================================={Style.RESET_ALL}")
     print(f"Course:     {config_obj.mucsv2_instance_code}")
     print(f"Section/TA: {grader}")
@@ -143,11 +150,11 @@ def display_results(config_obj: Config, lab_window_status: bool, run_result: boo
         print(f"{Fore.RED}========================================={Style.RESET_ALL}")
         print(f"{Fore.RED}*******OUTSIDE OF SUBMISSION WINDOW******{Style.RESET_ALL}")
         print(f"{Fore.RED}========================================={Style.RESET_ALL}")
-    elif (run_result.get("no_compile") is not None): 
+    elif (run_result.get("no_compile") is not None):
         print(f"{Fore.RED}========================================={Style.RESET_ALL}")
         print(f"{Fore.RED}************FAILED TO COMPILE************{Style.RESET_ALL}")
         print(f"{Fore.RED}========================================={Style.RESET_ALL}")
-    elif(len(run_result) > 0):
+    elif (len(run_result) > 0):
         print(f"{Fore.YELLOW}====================================================={Style.RESET_ALL}")
         print(f"{Fore.YELLOW}**********SUBMISSION SUCCESSFUL WITH ERRORS**********{Style.RESET_ALL}")
         print(f"{Fore.YELLOW}====================================================={Style.RESET_ALL}")
@@ -167,6 +174,8 @@ def prepare_test_directory(config_obj: Config, file_name: str, lab_name: str, us
         shutil.copy(entry.path, student_temp_files_dir)
     shutil.copy(file_name, student_temp_files_dir)
     return student_temp_files_dir
+
+
 def compile_and_run_submission(config_obj: Config, temp_dir: str) -> bool:
     is_make = False
     for entry in os.scandir(temp_dir):
@@ -185,9 +194,10 @@ def compile_and_run_submission(config_obj: Config, temp_dir: str) -> bool:
     for error in errors.values():
         print(f"{Fore.RED}{error}{Style.RESET_ALL}")
     return errors
+
+
 def clean_up_test_directory(temp_dir: str):
     shutil.rmtree(temp_dir)
-
 
 
 # Creates a new toml file.
@@ -197,7 +207,7 @@ if __name__ == "__main__":
     # Stage 0 - Collect Command Args
     username = getpass.getuser()
     colorama_init()
-    if (len(sys.argv) < 4):
+    if len(sys.argv) < 4:
         print(f"{Fore.RED} *** Too few arguments provided! *** {Style.RESET_ALL}")
         print(f"{Fore.RED}Usage: mucsmake{Fore.BLUE} {{class_code}} {{lab_name}} {{file_to_submit}} {Style.RESET_ALL}")
         exit()
@@ -210,6 +220,3 @@ if __name__ == "__main__":
         print(f"{Fore.RED}Usage: mucsmake{Fore.BLUE} {{class_code}} {{lab_name}} {{file_to_submit}} {Style.RESET_ALL}")
         exit()
     main(username, class_code, lab_name, file_name)
-
-
-
