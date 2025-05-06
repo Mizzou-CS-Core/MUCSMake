@@ -1,7 +1,7 @@
 import logging
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 from configuration.models import Config
 
@@ -31,9 +31,9 @@ def verify_assignment_existence(file_name: str) -> bool:
 def verify_assignment_window() -> bool:
     asn_name = _assignment.get("mucsv2_name")
     logging.debug(f"Verifying the time window of {asn_name}")
-    today = datetime.today()
-    start_date = _assignment['open_at']
-    end_date = _assignment['due_at']
+    today = datetime.now(timezone.utc)
+    start_date = datetime.fromisoformat(_assignment['open_at'].replace('Z', '+00:00'))
+    end_date = datetime.fromisoformat(_assignment['due_at'].replace('Z', '+00:00'))
     is_on_time = start_date < today < end_date
     logging.debug(f"Time window result: {is_on_time}")
     return is_on_time
