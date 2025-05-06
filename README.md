@@ -45,7 +45,7 @@ Otherwise, you can activate your virtual environment and run `python3 mucsmake.p
 
 In both instances, you will need to specify 1. your MUCSv2 instance code 2. the name of the assignment you're submitting to, and 3. the file path to the submission. 
 
-This looks like `mucsmake {mucs_instance_code} {assignment_name} {submission_file_path}`
+This looks like `mucsmake <mucs_instance_code> <assignment_name> <submission_file_path>`
 
 
 
