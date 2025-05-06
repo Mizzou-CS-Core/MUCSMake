@@ -13,7 +13,7 @@ class Config:
         self.valid_dir = valid_dir
         self.invalid_dir = invalid_dir
         self.late_dir = late_dir
-        self.db_path = db_path
+        self.db_path = self.get_base_path_with_instance_code() / db_path
         self.cwd = Path(os.getcwd())
 
     def get_base_path_with_instance_code(self):
