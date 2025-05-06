@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 
 import tomlkit
 from tomlkit import document, table, comment, dumps
@@ -8,13 +9,10 @@ from .models import Config
 _config: Config = None
 logger = logging.getLogger(__name__)
 
-CONFIG_FILE = "config.toml"
-
-
 def prepare_toml_doc(mucsv2_instance_code="", check_lab_header=True, run_valgrind=True,
                      base_path="/cluster/pixstor/class", db_path="/data/<mucs_instance_code>.db",
                      lab_submission_directory="/submissions", test_files_directory="/data/test_files",
-                     valid_dir=".valid", invalid_dir=".invalid", late_dir=".late"):
+                     valid_dir=".valid", invalid_dir=".invalid", late_dir=".late", config_path=Path("")):
     doc = document()
 
     general = table()
@@ -37,9 +35,11 @@ def prepare_toml_doc(mucsv2_instance_code="", check_lab_header=True, run_valgrin
     doc['general'] = general
     doc['paths'] = paths
 
-    with open(CONFIG_FILE, 'w') as f:
+    config = config_path / "mucsmake.toml"
+
+    with open(config, 'w') as f:
         _ = f.write(dumps(doc))
-    print(f"Created default {CONFIG_FILE}")
+    logger.debug(f"Created default {config}")
 
 
 def get_config() -> Config:
@@ -50,7 +50,7 @@ def get_config() -> Config:
 
 
 def prepare_config_obj():
-    with open(CONFIG_FILE, 'r') as f:
+    with open("mucsmake.toml", 'r') as f:
         content = f.read()
     doc = tomlkit.parse(content)
     global _config
