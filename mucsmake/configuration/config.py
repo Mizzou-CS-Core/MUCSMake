@@ -10,26 +10,30 @@ logger = logging.getLogger(__name__)
 
 CONFIG_FILE = "config.toml"
 
-def prepare_toml_doc():
+
+def prepare_toml_doc(mucsv2_instance_code="", check_lab_header=True, run_valgrind=True,
+                     base_path="/cluster/pixstor/class", db_path="/data/<mucs_instance_code>.db",
+                     lab_submission_directory="/submissions", test_files_directory="/data/test_files",
+                     valid_dir=".valid", invalid_dir=".invalid", late_dir=".late"):
     doc = document()
 
     general = table()
-    general.add("mucsv2_instance_code", "")
+    general.add("mucsv2_instance_code", mucsv2_instance_code)
     general.add(comment("Checks for a C header file corresponding to the lab name in the submission."))
-    general.add("check_lab_header", True)
-    general.add("run_valgrind", True)
+    general.add("check_lab_header", check_lab_header)
+    general.add("run_valgrind", run_valgrind)
 
     paths = table()
-    paths.add("base_path", "/cluster/pixstor/class/")
-    paths.add("db_path", "data/(mucs_instance_code).db")
-    paths.add("lab_submission_directory", "submissions")
-    paths.add("test_files_directory", "data/test_files")
+    paths.add("base_path", base_path)
+    paths.add("db_path", db_path)
+    paths.add("lab_submission_directory", lab_submission_directory)
+    paths.add("test_files_directory", test_files_directory)
     paths.add(comment("All valid submissions go here within your grader's submission folder."))
-    paths.add("valid_dir", ".valid")
+    paths.add("valid_dir", valid_dir)
     paths.add(comment("All invalid submissions go here within your grader's submission folder."))
-    paths.add("invalid_dir", ".invalid")
+    paths.add("invalid_dir", invalid_dir)
     paths.add(comment("All invalid submissions go here within your grader's submission folder."))
-    paths.add("late_dir", ".late")
+    paths.add("late_dir", late_dir)
     doc['general'] = general
     doc['paths'] = paths
 
