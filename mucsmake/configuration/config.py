@@ -3,7 +3,7 @@ import logging
 import tomlkit
 from tomlkit import document, table, comment, dumps
 
-from configuration.models import Config
+from .models import Config
 
 _config: Config = None
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ def prepare_toml_doc():
 
 def get_config() -> Config:
     if _config is None:
-        logger.error("The config has not been loaded into memory!")
+        logger.critical("The config has not been loaded into memory!")
         return None
     return _config
 
