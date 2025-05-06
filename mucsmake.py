@@ -6,28 +6,26 @@
 
 import getpass
 import logging
-import sys
 import os
 import shutil
 import stat
-
-import build_and_run
+import sys
 from datetime import datetime
 from pathlib import Path
 
-# https://pypi.org/project/colorama/
-from colorama import init as colorama_init
+import build_and_run
+import mucs_database.submission.accessors as dao_submission
 from colorama import Fore
 from colorama import Style
+# https://pypi.org/project/colorama/
+from colorama import init as colorama_init
 from colorlog import ColoredFormatter
+from mucs_database.init import initialize_database
 
 from configuration.config import prepare_toml_doc, prepare_config_obj, get_config
-from configuration.models import Config
 from validation.validators import verify_assignment_header_inclusion, verify_assignment_existence, \
     verify_assignment_window, \
     verify_assignment_name, validate_section
-from mucs_database.init import initialize_database
-import mucs_database.submission.accessors as dao_submission
 
 
 def setup_logging():
@@ -60,8 +58,13 @@ def setup_logging():
 logger = logging.getLogger(__name__)
 
 
-
-def mucsmake(username: str, lab_name: str, file_name: str):
+def run_procedures(username: str, lab_name: str, file_name: str):
+    """
+    Runs the validators and compilation procedures for MUCSMake.
+    :param username: The pawprint of the submitting user.
+    :param lab_name: The name of the assignment submitted to.
+    :param file_name: The file name/path of the submission.
+    """
     # Stage 2 - Verify Parameters and Submission
     lab_name_status = verify_assignment_name(lab_name)
     if not lab_name_status:
@@ -77,29 +80,33 @@ def mucsmake(username: str, lab_name: str, file_name: str):
     lab_window_status = verify_assignment_window()
     if not lab_window_status:
         logger.warning(f"Your submission {file_name} is outside of the allowed submission window.")
-    # enrollment_status = verify_student_enrollment(config_obj=get_config())
-    # if not enrollment_status:
-    #     print(
-    #         f"{Fore.RED}*** Error: You are not enrolled in {Style.RESET_ALL}{Fore.BLUE}{get_config().mucsv2_instance_code}{Style.RESET_ALL}{Fore.RED} ")
-    #     exit()
     grader = validate_section(username)
 
     student_temp_dir = prepare_test_directory(file_name, lab_name)
     # Stage 3 - Compile and Run
     run_errors = compile_and_run_submission(student_temp_dir)
-    clean_up_test_directory(student_temp_dir)
     # Stage 4 - Place Submission
-    place_submission(lab_window_status=lab_window_status, run_result=run_errors, grader=grader, lab_name=lab_name,
+    place_submission(is_late=lab_window_status, run_result=run_errors, grading_group_name=grader, lab_name=lab_name,
                      file_name=file_name, username=username)
     # Stage 5 - Display Results
-    display_results(config_obj=get_config(), lab_window_status=lab_window_status, grader=grader, lab_name=lab_name,
+    display_results(is_late=lab_window_status, grading_group_name=grader, lab_name=lab_name,
                     file_name=file_name, username=username, run_result=run_errors)
 
 
-def place_submission(lab_window_status: bool, run_result: dict, grader: str, lab_name: str, file_name: str,
+def place_submission(is_late: bool, run_result: dict, grading_group_name: str, lab_name: str, file_name: str,
                      username: str):
+    """
+    Creates and places the submission in the appropriate folder on the MUCSv2 filesystem.
+    Signs a Submission object in the DB.
+    :param is_late: If the submission is late to the assignment.
+    :param run_result: The error(s) collected during submission program execution.
+    :param grading_group_name: The name of the grading group associated with the submitting user.
+    :param lab_name: The name of the assignment submitted to.
+    :param file_name: The file name/path of the submission.
+    :param username: The pawprint of the submitting user.
+    """
     config = get_config()
-    submission_path = config.lab_submission_directory / lab_name / grader
+    submission_path = config.lab_submission_directory / lab_name / grading_group_name
     directory_name = username + "_" + str(datetime.today()).replace(" ", "_")
     valid_path = submission_path / config.valid_dir
     invalid_path = submission_path / config.invalid_dir
@@ -109,7 +116,7 @@ def place_submission(lab_window_status: bool, run_result: dict, grader: str, lab
     logger.debug(f"Valid path: {valid_path}")
     logger.debug(f"Invalid path: {invalid_path}")
     # if a submission compiles and isn't late it is eliglibe for grading
-    is_valid = lab_window_status and run_result.get("no_compile") is None
+    is_valid = is_late and run_result.get("no_compile") is None
     logger.debug(f"Is valid: {is_valid}")
     valid_path.mkdir(exist_ok=True, parents=True)
     invalid_path.mkdir(exist_ok=True, parents=True)
@@ -134,22 +141,32 @@ def place_submission(lab_window_status: bool, run_result: dict, grader: str, lab
         invalid_student_dir.mkdir()
         shutil.copy(file_name, invalid_student_dir)
         file_name_path = invalid_student_dir / Path(file_name).name
-    dao_submission.store_submission(person_pawprint=username, assignment_name=lab_name, submission_path=file_name_path, is_valid=is_valid, is_late=lab_window_status, time_submitted=datetime.now())
+    # create an entry of a submission in the DB
+    dao_submission.store_submission(person_pawprint=username, assignment_name=lab_name, submission_path=file_name_path,
+                                    is_valid=is_valid, is_late=is_late, time_submitted=datetime.now())
 
 
-
-def display_results(config_obj: Config, lab_window_status: bool, run_result: dict, grader: str, lab_name: str,
+def display_results(is_late: bool, run_result: dict, grading_group_name: str, lab_name: str,
                     file_name: str, username: str):
+    """
+    Displays a readout of the submission results to the calling user.
+    :param is_late: If the submission is late to the assignment.
+    :param run_result: The error(s) collected during submission program execution.
+    :param grading_group_name: The name of the grading group associated with the submitting user.
+    :param lab_name: The name of the assignment submitted to.
+    :param file_name: The file name/path of the submission.
+    :param username: The pawprint of the submitting user.
+    """
     print(f"{Fore.BLUE}========================================={Style.RESET_ALL}")
-    print(f"Course:     {config_obj.mucsv2_instance_code}")
-    print(f"Section/TA: {grader}")
+    print(f"Course:     {get_config().mucsv2_instance_code}")
+    print(f"Section/TA: {grading_group_name}")
     print(f"Assignment: {lab_name}")
     print(f"User:       {username}")
     print(f"Submission: {file_name}")
     print(f"{Fore.BLUE}========================================={Style.RESET_ALL}")
     print(f"{Fore.BLUE}***********SUBMISSION COMPLETE**********{Style.RESET_ALL}")
     print(f"\n")
-    if not lab_window_status:
+    if not is_late:
         print(f"{Fore.RED}========================================={Style.RESET_ALL}")
         print(f"{Fore.RED}*******OUTSIDE OF SUBMISSION WINDOW******{Style.RESET_ALL}")
         print(f"{Fore.RED}========================================={Style.RESET_ALL}")
@@ -168,6 +185,13 @@ def display_results(config_obj: Config, lab_window_status: bool, run_result: dic
 
 
 def prepare_test_directory(file_name: str, lab_name: str) -> str:
+    """
+    Creates a testing directory on the user's local directory
+    Copies relevant files from MUCSv2 backend
+    :param file_name: The name of the file being submitted
+    :param lab_name: The assignment being submitted to
+    :return:
+    """
     temp_lab_dir = get_config().cwd / f"{lab_name}_temp"
     logger.debug(f"Creating {temp_lab_dir}")
     temp_lab_dir.mkdir(exist_ok=True)
@@ -178,13 +202,18 @@ def prepare_test_directory(file_name: str, lab_name: str) -> str:
         if entry.is_dir():
             continue
         logger.debug(f"Copying {entry} into {temp_lab_dir}")
-        shutil.copy(entry.path, temp_lab_dir)
+        shutil.copy(entry, temp_lab_dir)
     logger.debug(f"Copying student's {file_name} to {temp_lab_dir}")
     shutil.copy(file_name, temp_lab_dir)
     return temp_lab_dir
 
 
 def compile_and_run_submission(temp_dir: str) -> dict[str, str]:
+    """
+    Compiles and runs a C submission.
+    :param temp_dir: A path to the directory containing the compilable code
+    :return: A dictionary of errors
+    """
     is_make = False
     for entry in os.scandir(temp_dir):
         if entry.name == "Makefile":
@@ -196,20 +225,16 @@ def compile_and_run_submission(temp_dir: str) -> dict[str, str]:
     if result.returncode != 0:
         logging.error(f"Submitted program does not compile!")
         errors['no_compile'] = "Submitted program does not compile!"
+        shutil.rmtree(temp_dir)
         return errors
     errors = build_and_run.run_executable(path=temp_dir)
     if len(errors) > 0:
         logging.warning(f"There were {len(errors)} errors in your submission. ")
     for error in errors.values():
         logging.warning(f"{error}")
+    shutil.rmtree(temp_dir)
     return errors
 
-
-def clean_up_test_directory(temp_dir: str):
-    shutil.rmtree(temp_dir)
-
-
-# Creates a new toml file.
 
 
 if __name__ == "__main__":
@@ -236,4 +261,4 @@ if __name__ == "__main__":
         exit()
     prepare_config_obj()
     initialize_database(sqlite_db_path=get_config().db_path, mucsv2_instance_code=get_config().mucsv2_instance_code)
-    mucsmake(username, lab_name, file_name)
+    run_procedures(username, lab_name, file_name)
