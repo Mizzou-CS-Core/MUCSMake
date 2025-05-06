@@ -21,13 +21,13 @@ from colorama import Fore
 from colorama import Style
 from colorlog import ColoredFormatter
 
-from configuration.config import prepare_toml_doc, prepare_config_obj
+from configuration.config import prepare_toml_doc, prepare_config_obj, get_config
 from configuration.models import Config
-from configuration.config import get_config
 from validation.validators import verify_assignment_header_inclusion, verify_assignment_existence, \
     verify_assignment_window, \
-    verify_assignment_name, verify_student_enrollment, validate_section
+    verify_assignment_name, validate_section
 from mucs_database.init import initialize_database
+import mucs_database.submission.accessors as dao_submission
 
 
 def setup_logging():
@@ -59,17 +59,9 @@ def setup_logging():
 
 logger = logging.getLogger(__name__)
 
-CONFIG_FILE = "config.toml"
 
 
 def mucsmake(username: str, lab_name: str, file_name: str):
-    # Stage 1 - Prepare Configuration
-    if not os.path.exists(path=CONFIG_FILE):
-        print()
-        prepare_toml_doc()
-        logger.critical(f"{CONFIG_FILE} does not exist, creating a default one")
-        exit()
-    prepare_config_obj()
     # Stage 2 - Verify Parameters and Submission
     lab_name_status = verify_assignment_name(lab_name)
     if not lab_name_status:
@@ -85,11 +77,11 @@ def mucsmake(username: str, lab_name: str, file_name: str):
     lab_window_status = verify_assignment_window()
     if not lab_window_status:
         logger.warning(f"Your submission {file_name} is outside of the allowed submission window.")
-    enrollment_status = verify_student_enrollment(config_obj=get_config())
-    if not enrollment_status:
-        print(
-            f"{Fore.RED}*** Error: You are not enrolled in {Style.RESET_ALL}{Fore.BLUE}{get_config().mucsv2_instance_code}{Style.RESET_ALL}{Fore.RED} ")
-        exit()
+    # enrollment_status = verify_student_enrollment(config_obj=get_config())
+    # if not enrollment_status:
+    #     print(
+    #         f"{Fore.RED}*** Error: You are not enrolled in {Style.RESET_ALL}{Fore.BLUE}{get_config().mucsv2_instance_code}{Style.RESET_ALL}{Fore.RED} ")
+    #     exit()
     grader = validate_section(username)
 
     student_temp_dir = prepare_test_directory(file_name, lab_name)
@@ -97,40 +89,53 @@ def mucsmake(username: str, lab_name: str, file_name: str):
     run_errors = compile_and_run_submission(student_temp_dir)
     clean_up_test_directory(student_temp_dir)
     # Stage 4 - Place Submission
-    place_submission(config_obj=get_config(), lab_window_status=lab_window_status, grader=grader, lab_name=lab_name,
-                     file_name=file_name, username=username, run_result=run_errors)
+    place_submission(lab_window_status=lab_window_status, run_result=run_errors, grader=grader, lab_name=lab_name,
+                     file_name=file_name, username=username)
     # Stage 5 - Display Results
     display_results(config_obj=get_config(), lab_window_status=lab_window_status, grader=grader, lab_name=lab_name,
                     file_name=file_name, username=username, run_result=run_errors)
 
 
-def place_submission(config_obj: Config, lab_window_status: bool, run_result: dict, grader: str, lab_name: str,
-                     file_name: str, username: str):
-    submission_path = config_obj.lab_submission_directory + "/" + lab_name + "/" + grader
+def place_submission(lab_window_status: bool, run_result: dict, grader: str, lab_name: str, file_name: str,
+                     username: str):
+    config = get_config()
+    submission_path = config.lab_submission_directory / lab_name / grader
     directory_name = username + "_" + str(datetime.today()).replace(" ", "_")
-    valid_path = submission_path + "/" + config_obj.valid_dir
-    invalid_path = submission_path + "/" + config_obj.invalid_dir
-
+    valid_path = submission_path / config.valid_dir
+    invalid_path = submission_path / config.invalid_dir
+    logger.debug("Preparing to place submission")
+    logger.debug(f"Submission path: {submission_path}")
+    logger.debug(f"Directory name: {directory_name}")
+    logger.debug(f"Valid path: {valid_path}")
+    logger.debug(f"Invalid path: {invalid_path}")
+    # if a submission compiles and isn't late it is eliglibe for grading
     is_valid = lab_window_status and run_result.get("no_compile") is None
-    os.makedirs(valid_path, exist_ok=True)
-    os.makedirs(invalid_path, exist_ok=True)
+    logger.debug(f"Is valid: {is_valid}")
+    valid_path.mkdir(exist_ok=True, parents=True)
+    invalid_path.mkdir(exist_ok=True, parents=True)
+    logger.debug("Created valid and invalid directories (if they didn't exist before)")
 
-    if (is_valid):
-        valid_student_dir = valid_path + "/" + directory_name
-        os.makedirs(valid_student_dir)
+    if is_valid:
+        valid_student_dir = valid_path / directory_name
+        logger.debug(f"Valid student directory: {valid_student_dir} Creating it!")
+        valid_student_dir.mkdir()
         # sets directory to setgroupid, read/execute for users, and nothing else for non groups
-        os.chmod(valid_student_dir, 0o2770)
+        valid_student_dir.chmod(mode=0o2770)
         shutil.copy(file_name, valid_student_dir)
-        os.chmod(valid_student_dir + "/" + Path(file_name).name, stat.S_IRUSR | stat.S_IRGRP | stat.S_IXGRP)
-        symlink_dir = submission_path + "/" + username
+        file_name_path = valid_student_dir / Path(file_name).name
+        file_name_path.chmod(mode=stat.S_IRUSR | stat.S_IRGRP | stat.S_IXGRP)
+        symlink_dir = submission_path / username
         # if the link existed previously, let's undo it
-        if os.path.islink(symlink_dir):
-            os.unlink(symlink_dir)
+        if symlink_dir.is_symlink():
+            symlink_dir.unlink()
         os.symlink(valid_student_dir, symlink_dir, target_is_directory=True)
     else:
-        invalid_student_dir = invalid_path + "/" + directory_name
-        os.makedirs(invalid_student_dir)
+        invalid_student_dir = invalid_path / directory_name
+        invalid_student_dir.mkdir()
         shutil.copy(file_name, invalid_student_dir)
+        file_name_path = invalid_student_dir / Path(file_name).name
+    dao_submission.store_submission(person_pawprint=username, assignment_name=lab_name, submission_path=file_name_path, is_valid=is_valid, is_late=lab_window_status, time_submitted=datetime.now())
+
 
 
 def display_results(config_obj: Config, lab_window_status: bool, run_result: dict, grader: str, lab_name: str,
@@ -152,7 +157,7 @@ def display_results(config_obj: Config, lab_window_status: bool, run_result: dic
         print(f"{Fore.RED}========================================={Style.RESET_ALL}")
         print(f"{Fore.RED}************FAILED TO COMPILE************{Style.RESET_ALL}")
         print(f"{Fore.RED}========================================={Style.RESET_ALL}")
-    elif (len(run_result) > 0):
+    elif len(run_result) > 0:
         print(f"{Fore.YELLOW}====================================================={Style.RESET_ALL}")
         print(f"{Fore.YELLOW}**********SUBMISSION SUCCESSFUL WITH ERRORS**********{Style.RESET_ALL}")
         print(f"{Fore.YELLOW}====================================================={Style.RESET_ALL}")
@@ -189,7 +194,7 @@ def compile_and_run_submission(temp_dir: str) -> dict[str, str]:
     result = build_and_run.compile(compilable_code_path=temp_dir, use_makefile=is_make, filename=file_name)
     # returns 2 if doesnt link
     if result.returncode != 0:
-        logging.error(f"Submitted program does not compile!: {result.stderr}")
+        logging.error(f"Submitted program does not compile!")
         errors['no_compile'] = "Submitted program does not compile!"
         return errors
     errors = build_and_run.run_executable(path=temp_dir)
@@ -223,6 +228,11 @@ if __name__ == "__main__":
         # edge case to catch during preappended absolute paths
         logger.error("Too few arguments provided!")
         logger.error("Usage: mucsmake class_code assignment_name file_to_submit")
+        exit()
+    if not os.path.exists(path="config.toml"):
+        print()
+        prepare_toml_doc()
+        logger.critical("config.toml does not exist, creating a default one")
         exit()
     prepare_config_obj()
     initialize_database(sqlite_db_path=get_config().db_path, mucsv2_instance_code=get_config().mucsv2_instance_code)
