@@ -6,6 +6,7 @@
 
 import getpass
 import logging
+from logging.handlers import MemoryHandler, RotatingFileHandler
 import os
 import shutil
 import stat
@@ -33,11 +34,8 @@ def setup_logging():
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
 
-    fh = logging.FileHandler("mucs_startup.log", encoding="utf-8")
-    fh.setLevel(logging.DEBUG)
-    fh.setFormatter(logging.Formatter(
-        "%(asctime)s [%(levelname)s] %(name)s:%(lineno)d - %(message)s"
-    ))
+    mem = MemoryHandler(capacity=10000, flushLevel=logging.CRITICAL, target=None)
+    root.addHandler(mem)
     # log info and above to console
     ch = logging.StreamHandler()
     ch.setLevel(logging.WARNING)
@@ -51,8 +49,39 @@ def setup_logging():
         'CRITICAL': 'bold_red',
     }
     ch.setFormatter(ColoredFormatter(fmt, log_colors=colors))
-    root.addHandler(fh)
     root.addHandler(ch)
+    return mem
+
+
+def bind_file_handler(memory_handler, log_path,
+                      max_bytes=10 * 1024 * 1024, backup_count=3):
+    """
+    Create and attach a rotating file handler, then flush the memory buffer
+    so all early logs go into the file.
+    """
+    root = logging.getLogger()
+    log = log_path.parent / "mucsmake.log"
+
+    # 1) Create file handler
+    fh = RotatingFileHandler(
+        log,
+        maxBytes=max_bytes,
+        backupCount=backup_count,
+        encoding="utf-8"
+    )
+    fh.setLevel(logging.DEBUG)  # log every level to file
+    fh.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s:%(lineno)d  %(message)s"
+    ))
+
+    # 2) Tell the buffer where to send its records
+    memory_handler.setTarget(fh)
+
+    # 3) Attach file handler to root (for new records)
+    root.addHandler(fh)
+
+    # 4) Flush everything buffered so far into the file
+    memory_handler.flush()
 
 
 logger = logging.getLogger(__name__)
@@ -86,11 +115,12 @@ def run_procedures(username: str, lab_name: str, file_name: str):
     # Stage 3 - Compile and Run
     run_errors = compile_and_run_submission(student_temp_dir)
     # Stage 4 - Place Submission
-    place_submission(is_late=lab_window_status, run_result=run_errors, grading_group_name=grader, lab_name=lab_name,
+    file_path = place_submission(is_late=lab_window_status, run_result=run_errors, grading_group_name=grader, lab_name=lab_name,
                      file_name=file_name, username=username)
     # Stage 5 - Display Results
     display_results(is_late=lab_window_status, grading_group_name=grader, lab_name=lab_name,
                     file_name=file_name, username=username, run_result=run_errors)
+    return file_path
 
 
 def place_submission(is_late: bool, run_result: dict, grading_group_name: str, lab_name: str, file_name: str,
@@ -144,6 +174,7 @@ def place_submission(is_late: bool, run_result: dict, grading_group_name: str, l
     # create an entry of a submission in the DB
     dao_submission.store_submission(person_pawprint=username, assignment_name=lab_name, submission_path=file_name_path,
                                     is_valid=is_valid, is_late=is_late, time_submitted=datetime.now())
+    return file_name_path
 
 
 def display_results(is_late: bool, run_result: dict, grading_group_name: str, lab_name: str,
@@ -236,11 +267,10 @@ def compile_and_run_submission(temp_dir: str) -> dict[str, str]:
     return errors
 
 
-
 if __name__ == "__main__":
     # Stage 0 - Collect Command Args
     username = getpass.getuser()
-    setup_logging()
+    mem = setup_logging()
     colorama_init()
     if len(sys.argv) < 4:
         logger.error("Too few arguments provided!")
@@ -261,4 +291,5 @@ if __name__ == "__main__":
         exit()
     prepare_config_obj()
     initialize_database(sqlite_db_path=get_config().db_path, mucsv2_instance_code=get_config().mucsv2_instance_code)
-    run_procedures(username, lab_name, file_name)
+    path = run_procedures(username, lab_name, file_name)
+    bind_file_handler(mem, path)
